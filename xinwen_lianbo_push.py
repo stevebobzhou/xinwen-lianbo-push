@@ -76,7 +76,6 @@ class XinwenLianbo:
         """清理并格式化内容"""
         if not content:
             return ''
-        # 移除HTML标签
         content = re.sub(r'<br\s*/?>', '\n', content)
         content = re.sub(r'<[^>]+>', '', content)
         content = re.sub(r'&nbsp;', ' ', content)
@@ -95,40 +94,41 @@ class PushPlus:
         if not self.token:
             return False
         try:
-            html = f"""
-<!DOCTYPE html>
+            # 格式化内容
+            paragraphs = content.replace('\n\n', '</p><p>').replace('\n', '<br/>')
+
+            html = """<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
     <style>
-        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 20px; background: #f5f5f5; }}
-        .container {{ max-width: 600px; margin: 0 auto; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 12px rgba(0,0,0,0.1); }}
-        .header {{ background: linear-gradient(135deg, #c41e3a, #8b0000); color: #fff; padding: 20px; text-align: center; }}
-        .header h1 {{ margin: 0; font-size: 24px; }}
-        .header .date {{ margin-top: 8px; opacity: 0.9; }}
-        .content {{ padding: 20px; line-height: 1.8; color: #333; font-size: 15px; }}
-        .content p {{ margin: 0 0 12px 0; text-indent: 2em; }}
-        .footer {{ padding: 20px; text-align: center; border-top: 1px solid #eee; }}
-        .btn {{ display: inline-block; background: #c41e3a; color: #fff; padding: 12px 30px; border-radius: 25px; text-decoration: none; font-size: 14px; }}
-        .btn:hover {{ background: #a01830; }}
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 16px; background: #f5f5f5; margin: 0; }
+        .container { max-width: 100%; background: #fff; border-radius: 8px; overflow: hidden; }
+        .header { background: linear-gradient(135deg, #c41e3a, #8b0000); color: #fff; padding: 16px; text-align: center; }
+        .header h1 { margin: 0; font-size: 20px; }
+        .header .date { margin-top: 6px; opacity: 0.9; font-size: 14px; }
+        .content { padding: 16px; line-height: 1.8; color: #333; font-size: 15px; }
+        .content p { margin: 0 0 12px 0; text-indent: 2em; }
+        .footer { padding: 16px; text-align: center; border-top: 1px solid #eee; }
+        .btn { display: inline-block; background: #c41e3a; color: #fff; padding: 10px 24px; border-radius: 20px; text-decoration: none; font-size: 14px; }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
             <h1>📺 新闻联播</h1>
-            <div class="date">{title.split()[-1] if title else ''}</div>
+            <div class="date">""" + title.replace('📺 新闻联播 ', '') + """</div>
         </div>
         <div class="content">
-            {content.replace('\n\n', '</p><p>').replace('\n', '<br/>')}
+            <p>""" + paragraphs + """</p>
         </div>
         <div class="footer">
-            <a class="btn" href="{news_url}">阅读原文</a>
+            <a class="btn" href='""" + news_url + """'>阅读原文</a>
         </div>
     </div>
 </body>
-</html>
-"""
+</html>"""
+
             r = requests.post(
                 "http://www.pushplus.plus/send",
                 json={
@@ -200,14 +200,12 @@ def main():
             print("\n📤 推送中...")
             pusher = PushPlus(token)
 
-            # 使用HTML格式推送（链接可点击）
             title = f"📺 新闻联播 {news['date']}"
             success = pusher.push_html(title, content, news['url'])
 
             if success:
-                print("✅ 推送成功！")
+                print("✅ HTML推送成功！")
             else:
-                # 降级为txt格式
                 print("HTML推送失败，尝试txt格式...")
                 if pusher.push_txt(title, content, news['url']):
                     print("✅ 推送成功！")
