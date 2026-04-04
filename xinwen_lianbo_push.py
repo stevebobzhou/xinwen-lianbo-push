@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 新闻联播内容获取脚本
-多数据源 + 友好格式推送
+多数据源 + 每条新闻可点击
 """
 
 import requests
@@ -44,8 +44,10 @@ class XinwenLianbo:
         return None
 
     def _parse_rss(self, content):
-        """解析RSS"""
+        """解析RSS，返回所有新闻条目"""
         root = ET.fromstring(content)
+        items = []
+        
         for item in root.iter('item'):
             title = item.findtext('title', '')
             link = item.findtext('link', '')
@@ -53,13 +55,57 @@ class XinwenLianbo:
             pub_date = item.findtext('pubDate', '')
 
             if title:
+                # 提取单条新闻标题（从描述中解析）
+                news_items = self._parse_news_items(desc)
+                date_str = self._parse_date(pub_date)
+                
                 return {
                     'title': title,
-                    'date': self._parse_date(pub_date),
-                    'content': self._clean_content(desc),
+                    'date': date_str,
+                    'items': news_items,  # 新闻条目列表
                     'url': link
                 }
         return None
+
+    def _parse_news_items(self, desc):
+        """解析新闻条目，提取每条新闻的标题和链接"""
+        items = []
+        if not desc:
+            return items
+        
+        # RSSHub返回的格式通常包含多条新闻
+        # 格式类似: "1. 标题 2. 标题..." 或带链接的HTML
+        
+        # 先清理HTML
+        text = re.sub(r'<br\s*/?>', '\n', desc)
+        text = re.sub(r'</p>', '\n', text)
+        
+        # 提取带链接的新闻项
+        link_pattern = r'<a[^>]*href=["\']([^"\']+)["\'][^>]*>([^<]+)</a>'
+        links = re.findall(link_pattern, desc)
+        
+        if links:
+            for url, title in links:
+                title = title.strip()
+                if title and len(title) > 2:
+                    items.append({
+                        'title': title,
+                        'url': url
+                    })
+        
+        # 如果没提取到链接，按编号分割
+        if not items:
+            # 按数字编号分割
+            lines = re.split(r'\d+[\.、]\s*', text)
+            for line in lines:
+                line = line.strip()
+                if line and len(line) > 5:
+                    items.append({
+                        'title': line[:100],  # 限制长度
+                        'url': ''
+                    })
+        
+        return items
 
     def _parse_date(self, pub_date):
         """解析日期"""
@@ -72,58 +118,72 @@ class XinwenLianbo:
                 pass
         return datetime.now().strftime('%Y年%m月%d日')
 
-    def _clean_content(self, content):
-        """清理并格式化内容"""
-        if not content:
-            return ''
-        content = re.sub(r'<br\s*/?>', '\n', content)
-        content = re.sub(r'<[^>]+>', '', content)
-        content = re.sub(r'&nbsp;', ' ', content)
-        content = re.sub(r'&[a-z]+;', '', content)
-        content = re.sub(r'\n\s*\n', '\n\n', content)
-        content = re.sub(r'\s+', ' ', content).strip()
-        return content
-
 
 class PushPlus:
     def __init__(self, token):
         self.token = token
 
-    def push_html(self, title, content, news_url):
-        """推送HTML格式（支持链接跳转）"""
+    def push_html(self, title, news_items, date_str, main_url):
+        """推送HTML格式，每条新闻可点击"""
         if not self.token:
             return False
         try:
-            # 格式化内容
-            paragraphs = content.replace('\n\n', '</p><p>').replace('\n', '<br/>')
+            # 构建新闻列表HTML
+            items_html = ""
+            for i, item in enumerate(news_items, 1):
+                item_title = item['title'][:80]  # 限制标题长度
+                item_url = item.get('url', '')
+                
+                if item_url:
+                    items_html += f"""
+            <div class="item">
+                <a href="{item_url}" class="item-link">
+                    <span class="num">{i}</span>
+                    <span class="title">{item_title}</span>
+                    <span class="arrow">›</span>
+                </a>
+            </div>"""
+                else:
+                    items_html += f"""
+            <div class="item">
+                <span class="num">{i}</span>
+                <span class="title">{item_title}</span>
+            </div>"""
 
             html = """<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 16px; background: #f5f5f5; margin: 0; }
-        .container { max-width: 100%; background: #fff; border-radius: 8px; overflow: hidden; }
-        .header { background: linear-gradient(135deg, #c41e3a, #8b0000); color: #fff; padding: 16px; text-align: center; }
-        .header h1 { margin: 0; font-size: 20px; }
-        .header .date { margin-top: 6px; opacity: 0.9; font-size: 14px; }
-        .content { padding: 16px; line-height: 1.8; color: #333; font-size: 15px; }
-        .content p { margin: 0 0 12px 0; text-indent: 2em; }
-        .footer { padding: 16px; text-align: center; border-top: 1px solid #eee; }
-        .btn { display: inline-block; background: #c41e3a; color: #fff; padding: 10px 24px; border-radius: 20px; text-decoration: none; font-size: 14px; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; padding: 12px; }
+        .container { background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .header { background: linear-gradient(135deg, #c41e3a, #8b0000); color: #fff; padding: 20px 16px; text-align: center; }
+        .header h1 { font-size: 22px; font-weight: 600; margin-bottom: 6px; }
+        .header .date { font-size: 14px; opacity: 0.9; }
+        .content { padding: 8px 0; }
+        .item { border-bottom: 1px solid #f0f0f0; }
+        .item:last-child { border-bottom: none; }
+        .item-link { display: flex; align-items: center; padding: 14px 16px; text-decoration: none; color: #333; }
+        .num { display: inline-block; width: 24px; height: 24px; line-height: 24px; text-align: center; background: #f5f5f5; border-radius: 50%; font-size: 12px; color: #666; margin-right: 12px; flex-shrink: 0; }
+        .title { flex: 1; font-size: 15px; line-height: 1.5; color: #333; }
+        .arrow { color: #ccc; font-size: 18px; margin-left: 8px; flex-shrink: 0; }
+        .footer { padding: 16px; text-align: center; background: #fafafa; }
+        .btn { display: inline-block; background: #c41e3a; color: #fff; padding: 10px 28px; border-radius: 20px; text-decoration: none; font-size: 14px; }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
             <h1>📺 新闻联播</h1>
-            <div class="date">""" + title.replace('📺 新闻联播 ', '') + """</div>
+            <div class="date">""" + date_str + """</div>
         </div>
         <div class="content">
-            <p>""" + paragraphs + """</p>
+""" + items_html + """
         </div>
         <div class="footer">
-            <a class="btn" href='""" + news_url + """'>阅读原文</a>
+            <a class="btn" href='""" + main_url + """'>查看完整内容</a>
         </div>
     </div>
 </body>
@@ -144,40 +204,6 @@ class PushPlus:
             print(f"推送异常: {e}")
             return False
 
-    def push_txt(self, title, content, news_url):
-        """推送txt格式（兼容性好）"""
-        if not self.token:
-            return False
-        try:
-            txt = f"""📺 新闻联播
-
-{title}
-
-━━━━━━━━━━━━━
-
-{content}
-
-━━━━━━━━━━━━━
-
-📎 点击链接阅读原文：
-{news_url}
-
-💡 复制链接到浏览器打开"""
-            r = requests.post(
-                "http://www.pushplus.plus/send",
-                json={
-                    "token": self.token,
-                    "title": title,
-                    "content": txt,
-                    "template": "txt"
-                },
-                timeout=15
-            ).json()
-            return r.get('code') == 200
-        except Exception as e:
-            print(f"推送异常: {e}")
-            return False
-
 
 def main():
     print("=" * 50)
@@ -190,10 +216,7 @@ def main():
     if news:
         print(f"\n📰 标题: {news['title']}")
         print(f"📅 日期: {news['date']}")
-
-        content = news['content']
-        if len(content) > 3000:
-            content = content[:3000] + '...'
+        print(f"📋 条目数: {len(news['items'])}")
 
         token = os.environ.get('PUSHPLUS_TOKEN')
         if token:
@@ -201,18 +224,25 @@ def main():
             pusher = PushPlus(token)
 
             title = f"📺 新闻联播 {news['date']}"
-            success = pusher.push_html(title, content, news['url'])
+            success = pusher.push_html(
+                title=title,
+                news_items=news['items'],
+                date_str=news['date'],
+                main_url=news['url']
+            )
 
             if success:
                 print("✅ HTML推送成功！")
             else:
-                print("HTML推送失败，尝试txt格式...")
-                if pusher.push_txt(title, content, news['url']):
-                    print("✅ 推送成功！")
+                print("❌ 推送失败")
 
         # 保存
         with open(f'xinwen_lianbo_{datetime.now():%Y-%m-%d}.txt', 'w', encoding='utf-8') as f:
-            f.write(f"{news['title']}\n\n{news['date']}\n\n{content}\n\n{news['url']}")
+            for i, item in enumerate(news['items'], 1):
+                f.write(f"{i}. {item['title']}\n")
+                if item.get('url'):
+                    f.write(f"   {item['url']}\n")
+            f.write(f"\n完整链接: {news['url']}\n")
         print("💾 已保存")
     else:
         print("\n❌ 所有数据源均不可用")
